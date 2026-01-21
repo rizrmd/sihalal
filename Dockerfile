@@ -48,7 +48,11 @@ RUN a2enmod rewrite headers
 ENV APACHE_DOCUMENT_ROOT=/var/www/public
 RUN echo "ServerName localhost" >> /etc/apache2/apache2.conf \
     && sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/*.conf \
-    && sed -ri -e 's!/var/www/!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/apache2.conf /etc/apache2/conf-available/*.conf
+    && sed -ri -e 's!/var/www/!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/apache2.conf /etc/apache2/conf-available/*.conf \
+    && echo "<Directory ${APACHE_DOCUMENT_ROOT}>" >> /etc/apache2/sites-available/000-default.conf \
+    && echo "    AllowOverride All" >> /etc/apache2/sites-available/000-default.conf \
+    && echo "    Require all granted" >> /etc/apache2/sites-available/000-default.conf \
+    && echo "</Directory>" >> /etc/apache2/sites-available/000-default.conf
 
 # 5. Install Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
