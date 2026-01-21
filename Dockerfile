@@ -1,5 +1,11 @@
 FROM php:8.3-apache
 
+# Build-time arguments (can be overridden during build: --build-arg APP_ENV=production)
+ARG APP_ENV=production
+
+# Runtime environment variables (can be overridden at runtime via -e or --env-file)
+# Set APP_ENV=production during build to ensure proper optimizations
+
 # 1. Install system dependencies & libraries
 RUN apt-get update && apt-get install -y \
     git \
@@ -45,7 +51,10 @@ RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-av
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
 # 6. Set Environment Variables
-ENV COMPOSER_ALLOW_SUPERUSER=1
+# Use the build-time ARG and set as ENV (can be overridden at runtime)
+ENV APP_ENV=${APP_ENV} \
+    APP_DEBUG=false \
+    COMPOSER_ALLOW_SUPERUSER=1
 WORKDIR /var/www
 
 # 7. Copy composer files first (Optimize Layer Cache)
