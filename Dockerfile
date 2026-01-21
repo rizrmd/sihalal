@@ -73,16 +73,19 @@ RUN composer install \
 # 9. Copy application files
 COPY . /var/www
 
-# 10. Set proper permissions
-RUN chown -R www-data:www-data /var/www \
+# 10. Create Laravel storage structure (before volume mount)
+RUN mkdir -p /var/www/storage/framework/cache \
+    /var/www/storage/framework/sessions \
+    /var/www/storage/framework/views \
+    /var/www/storage/logs \
+    /var/www/storage/app/public \
+    && chown -R www-data:www-data /var/www \
     && chmod -R 775 /var/www/storage \
     && chmod -R 775 /var/www/bootstrap/cache \
     && chmod -R 755 /var/www/public
 
-# 11. Create storage link if not exists
-RUN if [ ! -L /var/www/public/storage ]; then \
-    ln -s /var/www/storage/app/public /var/www/public/storage; \
-    fi
+# 11. Create storage link
+RUN ln -srf /var/www/storage/app/public /var/www/public/storage
 
 # 12. Optimize Laravel for production
 RUN php artisan config:cache \
