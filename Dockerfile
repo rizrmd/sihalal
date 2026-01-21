@@ -6,7 +6,7 @@ ARG APP_ENV=production
 # Runtime environment variables (can be overridden at runtime via -e or --env-file)
 # Set APP_ENV=production during build to ensure proper optimizations
 
-# 1. Install system dependencies & libraries
+# 1. Install system dependencies & libraries (including Node.js)
 RUN apt-get update && apt-get install -y \
     git \
     unzip \
@@ -20,6 +20,8 @@ RUN apt-get update && apt-get install -y \
     libicu-dev \
     libpq-dev \
     zip \
+    nodejs \
+    npm \
     && rm -rf /var/lib/apt/lists/*
 
 # 2. Install & Configure PHP extensions (including PostgreSQL)
@@ -87,7 +89,10 @@ RUN mkdir -p /var/www/storage/framework/cache \
 # 11. Create storage link
 RUN ln -srf /var/www/storage/app/public /var/www/public/storage
 
-# 12. Optimize Laravel for production
+# 12. Build frontend assets with Vite
+RUN npm install && npm run build
+
+# 13. Optimize Laravel for production
 RUN php artisan config:cache \
     && php artisan route:cache \
     && php artisan view:cache
