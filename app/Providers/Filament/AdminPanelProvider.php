@@ -28,7 +28,8 @@ class AdminPanelProvider extends PanelProvider
             ->id('admin')
             ->path('admin')
             ->login()
-            ->brandLogo(asset('images/logo.png'))
+            ->brandLogo(secure_asset('images/logo.png'))
+            ->brandLogoHeight('3rem')
             ->brandName('Platform')
             ->colors([
                 'primary' => Color::Green,
@@ -38,7 +39,7 @@ class AdminPanelProvider extends PanelProvider
             ->databaseNotificationsPolling('5s')
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\Filament\Resources')
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\Filament\Pages')
-            ->favicon(asset('images/favicon.png'))
+            ->favicon(secure_asset('images/favicon.png'))
             ->pages([
                 Dashboard::class,
             ])
