@@ -46,7 +46,7 @@ RUN composer install \
     --no-dev
 
 # Install npm dependencies
-RUN npm ci --prefer-offline --no-audit
+RUN npm install --no-audit
 
 # Copy application files AFTER dependencies are installed
 COPY . .
