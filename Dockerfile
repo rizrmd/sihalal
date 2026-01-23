@@ -102,7 +102,6 @@ WORKDIR /var/www
 # Copy built artifacts from builder stage
 COPY --from=builder /var/www/vendor ./vendor
 COPY --from=builder /var/www/public/build ./public/build
-COPY --from=builder /var/www/public/hot ./public/hot
 
 # Copy application files
 COPY . .
