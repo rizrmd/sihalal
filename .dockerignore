@@ -17,3 +17,16 @@ bootstrap/cache/*.php
 hot
 npm-debug.log
 yarn-error.log
+
+# Additional cache optimizations
+public/build
+public/hot
+storage/*
+storage/logs/*
+storage/framework/cache/*
+storage/framework/sessions/*
+storage/framework/views/*
+storage/app/public/*
+bootstrap/cache/*
+*.log
+*.cache
