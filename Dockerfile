@@ -77,6 +77,7 @@ RUN apt-get update && apt-get install -y \
     libpq-dev \
     zip \
     curl \
+    supervisor \
     && rm -rf /var/lib/apt/lists/*
 
 # Install PHP extensions
@@ -120,6 +121,14 @@ RUN mkdir -p /var/www/storage/framework/cache \
 # Create storage link
 RUN ln -srf /var/www/storage/app/public /var/www/public/storage
 
+# Copy supervisor configuration
+COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+# Create supervisor log directory
+RUN mkdir -p /var/log/supervisor \
+    && mkdir -p /var/www/storage/logs \
+    && chown -R www-data:www-data /var/www/storage/logs
+
 # Optimize Laravel for production
 RUN php artisan config:cache \
     && php artisan route:cache \
@@ -127,4 +136,4 @@ RUN php artisan config:cache \
 
 EXPOSE 80
 
-CMD ["apache2-foreground"]
+CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
