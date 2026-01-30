@@ -104,11 +104,14 @@ WORKDIR /var/www
 COPY --from=builder /var/www/vendor ./vendor
 COPY --from=builder /var/www/public/build ./public/build
 
+# Copy composer binary from builder stage
+COPY --from=builder /usr/bin/composer /usr/bin/composer
+
 # Copy application files
 COPY . .
 
 # Regenerate autoloader to ensure all classes are discovered
-RUN php /var/www/vendor/bin/composer dump-autoload --classmap-authoritative
+RUN composer dump-autoload --classmap-authoritative
 
 # Create Laravel storage structure
 RUN mkdir -p /var/www/storage/framework/cache \
