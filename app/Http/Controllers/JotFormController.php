@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers;
 
-use App\Services\JotFormService;
+use App\Services\JotformService;
 use App\Models\JotformSync;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -10,9 +10,9 @@ use Illuminate\Support\Facades\Log;
 
 class JotFormController extends Controller
 {
-    protected JotFormService $jotformService;
+    protected JotformService $jotformService;
 
-    public function __construct(JotFormService $jotformService)
+    public function __construct(JotformService $jotformService)
     {
         $this->jotformService = $jotformService;
     }

@@ -3,7 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\JotformSync;
-use App\Services\JotFormService;
+use App\Services\JotformService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
@@ -31,7 +31,7 @@ class JotformSyncJob implements ShouldQueue
         cache()->put('jotform_sync_running', true, now()->addMinutes(10));
 
         try {
-            $jotformService = app(JotFormService::class);
+            $jotformService = app(JotformService::class);
             $submissions = $jotformService->getSubmissions();
 
             // Get all submission IDs from JotForm

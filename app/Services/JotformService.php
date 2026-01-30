@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
-class JotFormService
+class JotformService
 {
     protected string $apiKey;
     protected string $formId;
