@@ -107,6 +107,9 @@ COPY --from=builder /var/www/public/build ./public/build
 # Copy application files
 COPY . .
 
+# Regenerate autoloader to ensure all classes are discovered
+RUN composer dump-autoload --classmap-authoritative
+
 # Create Laravel storage structure
 RUN mkdir -p /var/www/storage/framework/cache \
     /var/www/storage/framework/sessions \
