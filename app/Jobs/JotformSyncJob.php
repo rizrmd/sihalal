@@ -58,6 +58,10 @@ class JotformSyncJob implements ShouldQueue
                     $existing = JotformSync::where('submission_id', $submissionId)->first();
 
                     if ($existing) {
+                        if ($existing->status_submit == 'SENT') {
+                            continue;
+                        }
+
                         $existing->update($data);
                         $updatedCount++;
                     } else {
