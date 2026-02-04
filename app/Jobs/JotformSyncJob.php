@@ -12,6 +12,12 @@ class JotformSyncJob implements ShouldQueue
 {
     use Queueable;
 
+    // Maximum time in seconds before job is considered failed
+    public int $timeout = 600; // 10 minutes
+
+    // Number of times the job may be attempted
+    public int $tries = 1; // No retry for sync to avoid duplicate data
+
     protected int $userId;
 
     /**
@@ -31,7 +37,6 @@ class JotformSyncJob implements ShouldQueue
         cache()->put('jotform_sync_running', true, now()->addMinutes(10));
 
         Log::info('JotForm sync job started', [
-            'job_id' => $this->job->getJobId() ?? method_exists($this, 'jobId') ? $this->jobId() : 'unknown',
             'user_id' => $this->userId,
         ]);
 
@@ -145,5 +150,22 @@ class JotformSyncJob implements ShouldQueue
             // Clear sync status regardless of success or failure
             cache()->forget('jotform_sync_running');
         }
+    }
+
+    /**
+     * Handle a job failure.
+     * This method is ALWAYS called by Laravel queue worker when the job fails,
+     * ensuring the sync status is cleared even if the job crashes, times out,
+     * or encounters any other type of failure.
+     */
+    public function failed(\Throwable $exception): void
+    {
+        // Make sure cache is cleared
+        cache()->forget('jotform_sync_running');
+
+        Log::error('JotForm sync job failed', [
+            'error' => $exception->getMessage(),
+            'trace' => $exception->getTraceAsString(),
+        ]);
     }
 }
