@@ -7,28 +7,45 @@ use App\Services\JotformService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class JotformSyncJob implements ShouldQueue
 {
     use Queueable;
 
     // Maximum time in seconds before job is considered failed
-    public int $timeout = 600; // 10 minutes
+    public int $timeout = 1800; // 30 minutes
 
-    // Number of times the job may be attempted
-    public int $tries = 1; // No retry for sync to avoid duplicate data
+    // Allow multiple attempts for stateful sync
+    public int $tries = 100; // Allow many retries
+
+    // Don't release back to queue on timeout - handle it ourselves
+    public int $maxExceptions = 1;
 
     protected int $userId;
+    protected ?string $syncId = null;
 
     // Process submissions in batches to avoid memory exhaustion
     protected int $batchSize = 20;
 
+    // Safe time buffer (seconds) before timeout to dispatch next job
+    protected int $timeBuffer = 30;
+
     /**
      * Create a new job instance.
      */
-    public function __construct(?int $userId = null)
+    public function __construct(?int $userId = null, ?string $syncId = null)
     {
         $this->userId = $userId ?? auth()->id();
+        $this->syncId = $syncId ?? 'jotform_sync_' . now()->timestamp;
+    }
+
+    /**
+     * Get the cache key for this sync session
+     */
+    protected function getCacheKey(string $suffix): string
+    {
+        return "{$this->syncId}_{$suffix}";
     }
 
     /**
@@ -39,11 +56,13 @@ class JotformSyncJob implements ShouldQueue
         // Increase memory limit for this job only
         ini_set('memory_limit', '256M');
 
-        // Set sync status to running
-        cache()->put('jotform_sync_running', true, now()->addMinutes(10));
+        $startTime = time();
+        $timeout = $this->timeout - $this->timeBuffer; // Leave buffer time
 
         Log::info('JotForm sync job started', [
             'user_id' => $this->userId,
+            'sync_id' => $this->syncId,
+            'timeout' => $timeout,
         ]);
 
         $syncedCount = 0;
@@ -55,13 +74,51 @@ class JotformSyncJob implements ShouldQueue
         try {
             $jotformService = app(JotformService::class);
 
-            // Process submissions in batches with pagination
-            $offset = 0;
+            // Get offset from cache (resume from last position or start fresh)
+            $offset = cache()->get($this->getCacheKey('offset'), 0);
             $limit = $this->batchSize;
             $hasMore = true;
 
+            // Initialize counters from cache
+            $syncedCount = cache()->get($this->getCacheKey('synced'), 0);
+            $updatedCount = cache()->get($this->getCacheKey('updated'), 0);
+            $allJotformIds = cache()->get($this->getCacheKey('jotform_ids'), []);
+
+            Log::info('Resuming JotForm sync', [
+                'sync_id' => $this->syncId,
+                'offset' => $offset,
+                'previous_synced' => $syncedCount,
+                'previous_updated' => $updatedCount,
+            ]);
+
             while ($hasMore) {
+                // Check if we're approaching timeout
+                if ((time() - $startTime) >= $timeout) {
+                    Log::info('Approaching timeout, dispatching next job', [
+                        'sync_id' => $this->syncId,
+                        'elapsed' => time() - $startTime,
+                        'offset' => $offset,
+                    ]);
+
+                    // Save progress to cache
+                    cache()->put($this->getCacheKey('offset'), $offset, now()->addHours(2));
+                    cache()->put($this->getCacheKey('synced'), $syncedCount, now()->addHours(2));
+                    cache()->put($this->getCacheKey('updated'), $updatedCount, now()->addHours(2));
+                    cache()->put($this->getCacheKey('jotform_ids'), $allJotformIds, now()->addHours(2));
+
+                    // Dispatch next job to continue
+                    self::dispatch($this->userId, $this->syncId);
+
+                    Log::info('Next job dispatched', [
+                        'sync_id' => $this->syncId,
+                        'will_continue_from' => $offset,
+                    ]);
+
+                    return; // Exit gracefully, next job will continue
+                }
+
                 Log::info('Fetching JotForm submissions batch', [
+                    'sync_id' => $this->syncId,
                     'offset' => $offset,
                     'limit' => $limit,
                 ]);
@@ -75,6 +132,7 @@ class JotformSyncJob implements ShouldQueue
                 }
 
                 Log::info('Processing batch', [
+                    'sync_id' => $this->syncId,
                     'batch_count' => count($submissions),
                     'offset' => $offset,
                 ]);
@@ -139,6 +197,12 @@ class JotformSyncJob implements ShouldQueue
                 // Move to next batch
                 $offset += $limit;
 
+                // Save progress after each batch
+                cache()->put($this->getCacheKey('offset'), $offset, now()->addHours(2));
+                cache()->put($this->getCacheKey('synced'), $syncedCount, now()->addHours(2));
+                cache()->put($this->getCacheKey('updated'), $updatedCount, now()->addHours(2));
+                cache()->put($this->getCacheKey('jotform_ids'), $allJotformIds, now()->addHours(2));
+
                 // If we got less than limit, we're done
                 if (count($batchIds) < $limit) {
                     $hasMore = false;
@@ -173,39 +237,56 @@ class JotformSyncJob implements ShouldQueue
             });
 
             Log::info('JotForm sync completed', [
+                'sync_id' => $this->syncId,
                 'synced' => $syncedCount,
                 'updated' => $updatedCount,
                 'deleted' => $deletedCount,
                 'errors' => count($errors),
+                'total_time' => time() - $startTime,
             ]);
+
+            // Clear all cache keys for this sync session
+            $this->clearSyncCache();
 
         } catch (\Exception $e) {
             Log::error('JotForm sync job failed', [
+                'sync_id' => $this->syncId,
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
 
+            // Save progress before throwing
+            cache()->put($this->getCacheKey('offset'), $offset ?? 0, now()->addHours(2));
+            cache()->put($this->getCacheKey('synced'), $syncedCount, now()->addHours(2));
+            cache()->put($this->getCacheKey('updated'), $updatedCount, now()->addHours(2));
+            cache()->put($this->getCacheKey('jotform_ids'), $allJotformIds ?? [], now()->addHours(2));
+
             throw $e;
-        } finally {
-            // Clear sync status regardless of success or failure
-            cache()->forget('jotform_sync_running');
         }
     }
 
     /**
-     * Handle a job failure.
-     * This method is ALWAYS called by Laravel queue worker when the job fails,
-     * ensuring the sync status is cleared even if the job crashes, times out,
-     * or encounters any other type of failure.
+     * Clear all cache keys for this sync session
      */
-    public function failed(\Throwable $exception): void
+    protected function clearSyncCache(): void
     {
-        // Make sure cache is cleared
-        cache()->forget('jotform_sync_running');
+        cache()->forget($this->getCacheKey('offset'));
+        cache()->forget($this->getCacheKey('synced'));
+        cache()->forget($this->getCacheKey('updated'));
+        cache()->forget($this->getCacheKey('jotform_ids'));
+    }
 
+    /**
+     * Handle a job failure.
+     */
+    public function failed(Throwable $exception): void
+    {
         Log::error('JotForm sync job failed', [
+            'sync_id' => $this->syncId,
             'error' => $exception->getMessage(),
             'trace' => $exception->getTraceAsString(),
         ]);
+
+        // Cache is kept for retry, will be cleared on next successful completion
     }
 }
