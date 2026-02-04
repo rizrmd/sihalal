@@ -20,6 +20,9 @@ class JotformSyncJob implements ShouldQueue
 
     protected int $userId;
 
+    // Process submissions in batches to avoid memory exhaustion
+    protected int $batchSize = 20;
+
     /**
      * Create a new job instance.
      */
@@ -33,6 +36,9 @@ class JotformSyncJob implements ShouldQueue
      */
     public function handle(): void
     {
+        // Increase memory limit for this job only
+        ini_set('memory_limit', '256M');
+
         // Set sync status to running
         cache()->put('jotform_sync_running', true, now()->addMinutes(10));
 
@@ -40,103 +46,137 @@ class JotformSyncJob implements ShouldQueue
             'user_id' => $this->userId,
         ]);
 
+        $syncedCount = 0;
+        $updatedCount = 0;
+        $deletedCount = 0;
+        $errors = [];
+        $allJotformIds = [];
+
         try {
             $jotformService = app(JotformService::class);
-            $submissions = $jotformService->getSubmissions();
 
-            Log::info('Fetched submissions from JotForm', [
-                'count' => count($submissions),
-            ]);
+            // Process submissions in batches with pagination
+            $offset = 0;
+            $limit = $this->batchSize;
+            $hasMore = true;
 
-            // Get all submission IDs from JotForm
-            $jotformSubmissionIds = array_filter(array_column($submissions, 'id'));
+            while ($hasMore) {
+                Log::info('Fetching JotForm submissions batch', [
+                    'offset' => $offset,
+                    'limit' => $limit,
+                ]);
 
-            $syncedCount = 0;
-            $updatedCount = 0;
-            $deletedCount = 0;
-            $errors = [];
+                // Get batch of submissions
+                $submissions = $jotformService->getSubmissionsPaginated($limit, $offset);
 
-            // Sync or update submissions from JotForm
-            foreach ($submissions as $submission) {
-                try {
-                    $submissionId = $submission['id'] ?? null;
+                if (empty($submissions)) {
+                    $hasMore = false;
+                    break;
+                }
 
-                    if (!$submissionId) {
-                        continue;
-                    }
+                Log::info('Processing batch', [
+                    'batch_count' => count($submissions),
+                    'offset' => $offset,
+                ]);
 
-                    // Format data
-                    $data = $jotformService->formatSubmissionData($submission);
+                // Collect all JotForm IDs for deletion check later
+                $batchIds = array_filter(array_column($submissions, 'id'));
+                $allJotformIds = array_merge($allJotformIds, $batchIds);
 
-                    // Check if submission already exists
-                    $existing = JotformSync::where('submission_id', $submissionId)->first();
+                // Sync or update submissions from JotForm
+                foreach ($submissions as $submission) {
+                    try {
+                        $submissionId = $submission['id'] ?? null;
 
-                    if ($existing) {
-                        if ($existing->status_submit == 'SENT') {
-                            Log::debug('Skipping submission with SENT status', [
-                                'submission_id' => $submissionId,
-                            ]);
+                        if (!$submissionId) {
                             continue;
                         }
 
-                        $existing->update($data);
-                        $updatedCount++;
+                        // Format data
+                        $data = $jotformService->formatSubmissionData($submission);
 
-                        Log::debug('Updated existing submission', [
-                            'submission_id' => $submissionId,
-                        ]);
-                    } else {
-                        JotformSync::create($data);
-                        $syncedCount++;
+                        // Check if submission already exists
+                        $existing = JotformSync::where('submission_id', $submissionId)->first();
 
-                        Log::debug('Created new submission', [
-                            'submission_id' => $submissionId,
-                        ]);
-                    }
-                } catch (\Exception $e) {
-                    $errors[] = [
-                        'submission_id' => $submission['id'] ?? 'unknown',
-                        'error' => $e->getMessage(),
-                    ];
+                        if ($existing) {
+                            if ($existing->status_submit == 'SENT') {
+                                Log::debug('Skipping submission with SENT status', [
+                                    'submission_id' => $submissionId,
+                                ]);
+                                continue;
+                            }
 
-                    Log::error('Failed to sync JotForm submission', [
-                        'submission_id' => $submission['id'] ?? 'unknown',
-                        'error' => $e->getMessage(),
-                    ]);
-                }
-            }
+                            $existing->update($data);
+                            $updatedCount++;
 
-            // Find and delete submissions that are not in JotForm anymore
-            $localSubmissions = JotformSync::all();
-            foreach ($localSubmissions as $localSubmission) {
-                if (!in_array($localSubmission->submission_id, $jotformSubmissionIds)) {
-                    try {
-                        // Delete files first
-                        $localSubmission->deleteSubmissionFiles();
+                            Log::debug('Updated existing submission', [
+                                'submission_id' => $submissionId,
+                            ]);
+                        } else {
+                            JotformSync::create($data);
+                            $syncedCount++;
 
-                        // Delete record
-                        $localSubmission->delete();
-
-                        $deletedCount++;
-
-                        Log::info('Deleted submission that was removed from JotForm', [
-                            'submission_id' => $localSubmission->submission_id,
-                        ]);
+                            Log::debug('Created new submission', [
+                                'submission_id' => $submissionId,
+                            ]);
+                        }
                     } catch (\Exception $e) {
-                        Log::error('Failed to delete local submission', [
-                            'submission_id' => $localSubmission->submission_id,
+                        $errors[] = [
+                            'submission_id' => $submission['id'] ?? 'unknown',
+                            'error' => $e->getMessage(),
+                        ];
+
+                        Log::error('Failed to sync JotForm submission', [
+                            'submission_id' => $submission['id'] ?? 'unknown',
                             'error' => $e->getMessage(),
                         ]);
                     }
                 }
+
+                // Free memory after processing batch
+                unset($submissions);
+
+                // Move to next batch
+                $offset += $limit;
+
+                // If we got less than limit, we're done
+                if (count($batchIds) < $limit) {
+                    $hasMore = false;
+                }
             }
+
+            // Find and delete submissions that are not in JotForm anymore
+            // Use chunk() to avoid loading all records into memory
+            JotformSync::chunk(100, function ($localSubmissions) use ($allJotformIds, &$deletedCount) {
+                foreach ($localSubmissions as $localSubmission) {
+                    if (!in_array($localSubmission->submission_id, $allJotformIds)) {
+                        try {
+                            // Delete files first
+                            $localSubmission->deleteSubmissionFiles();
+
+                            // Delete record
+                            $localSubmission->delete();
+
+                            $deletedCount++;
+
+                            Log::info('Deleted submission that was removed from JotForm', [
+                                'submission_id' => $localSubmission->submission_id,
+                            ]);
+                        } catch (\Exception $e) {
+                            Log::error('Failed to delete local submission', [
+                                'submission_id' => $localSubmission->submission_id,
+                                'error' => $e->getMessage(),
+                            ]);
+                        }
+                    }
+                }
+            });
 
             Log::info('JotForm sync completed', [
                 'synced' => $syncedCount,
                 'updated' => $updatedCount,
                 'deleted' => $deletedCount,
                 'errors' => count($errors),
-                'total_submissions' => count($submissions),
             ]);
 
         } catch (\Exception $e) {

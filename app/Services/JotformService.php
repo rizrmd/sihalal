@@ -58,6 +58,18 @@ class JotformService
                 $data = $response->json();
                 $submissions = $data['content'] ?? [];
 
+                // Count submissions with DELETED status
+                $deletedCount = count(array_filter($submissions, function($submission) {
+                    return ($submission['status'] ?? 'ACTIVE') === 'DELETED';
+                }));
+
+                if ($deletedCount > 0) {
+                    Log::info('JotForm Submissions - DELETED Status Count', [
+                        'deleted_count' => $deletedCount,
+                        'total_submissions' => count($submissions),
+                    ]);
+                }
+
                 // Additional filtering to ensure no deleted submissions are returned
                 $filtered = array_filter($submissions, function($submission) {
                     return ($submission['status'] ?? 'ACTIVE') !== 'DELETED';
