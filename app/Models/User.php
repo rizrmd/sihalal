@@ -19,6 +19,12 @@ class User extends Authenticatable implements FilamentUser
      */
     public function canAccessPanel(Panel $panel): bool
     {
+        // Di local/development: semua user bisa akses
+        if (app()->environment('local', 'development')) {
+            return true;
+        }
+
+        // Di production: hanya email @sihalal.class.id yang bisa akses
         return str_ends_with($this->email, '@sihalal.class.id');
     }
 

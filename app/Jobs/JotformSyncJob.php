@@ -30,9 +30,18 @@ class JotformSyncJob implements ShouldQueue
         // Set sync status to running
         cache()->put('jotform_sync_running', true, now()->addMinutes(10));
 
+        Log::info('JotForm sync job started', [
+            'job_id' => $this->job->getJobId() ?? method_exists($this, 'jobId') ? $this->jobId() : 'unknown',
+            'user_id' => $this->userId,
+        ]);
+
         try {
             $jotformService = app(JotformService::class);
             $submissions = $jotformService->getSubmissions();
+
+            Log::info('Fetched submissions from JotForm', [
+                'count' => count($submissions),
+            ]);
 
             // Get all submission IDs from JotForm
             $jotformSubmissionIds = array_filter(array_column($submissions, 'id'));
@@ -59,14 +68,25 @@ class JotformSyncJob implements ShouldQueue
 
                     if ($existing) {
                         if ($existing->status_submit == 'SENT') {
+                            Log::debug('Skipping submission with SENT status', [
+                                'submission_id' => $submissionId,
+                            ]);
                             continue;
                         }
 
                         $existing->update($data);
                         $updatedCount++;
+
+                        Log::debug('Updated existing submission', [
+                            'submission_id' => $submissionId,
+                        ]);
                     } else {
                         JotformSync::create($data);
                         $syncedCount++;
+
+                        Log::debug('Created new submission', [
+                            'submission_id' => $submissionId,
+                        ]);
                     }
                 } catch (\Exception $e) {
                     $errors[] = [

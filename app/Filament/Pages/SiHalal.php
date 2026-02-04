@@ -23,6 +23,7 @@ use Filament\Tables\Table;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
+use Filament\Tables\Filters\SelectFilter;
 use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
 use GuzzleHttp\Client;
@@ -422,6 +423,19 @@ class SiHalal extends Page implements HasForms, HasTable
                     ->label('Tanggal Sync')
                     ->dateTime('d M Y H:i')
                     ->sortable(),
+            ])
+            ->filters([
+                SelectFilter::make('status_submit')
+                    ->label('Status Submit')
+                    ->options([
+                        'ACTIVE' => 'ACTIVE',
+                        'INCOMPLETE' => 'INCOMPLETE',
+                        'FAILED' => 'FAILED',
+                        'ERROR' => 'ERROR',
+                        'SENT' => 'SENT',
+                    ])
+                    ->placeholder('Semua Status')
+                    ->native(false),
             ])
             ->selectable()
             ->bulkActions([
