@@ -28,7 +28,7 @@ class AdminPanelProvider extends PanelProvider
             ->id('admin')
             ->path('admin')
             ->login()
-            ->brandLogo(secure_asset('images/logo.png'))
+            ->brandLogo(secure_asset('images/logo-halalin-platform.webp'))
             ->brandLogoHeight('3rem')
             ->brandName('Platform')
             ->colors([
