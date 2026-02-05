@@ -26,7 +26,7 @@ class JotformSyncJob implements ShouldQueue
     protected ?string $syncId = null;
 
     // Process submissions in batches to avoid memory exhaustion
-    protected int $batchSize = 20;
+    protected int $batchSize = 50;
 
     // Safe time buffer (seconds) before timeout to dispatch next job
     protected int $timeBuffer = 30;
@@ -67,6 +67,7 @@ class JotformSyncJob implements ShouldQueue
 
         $syncedCount = 0;
         $updatedCount = 0;
+        $skippedCount = 0;
         $deletedCount = 0;
         $errors = [];
         $allJotformIds = [];
@@ -82,6 +83,7 @@ class JotformSyncJob implements ShouldQueue
             // Initialize counters from cache
             $syncedCount = cache()->get($this->getCacheKey('synced'), 0);
             $updatedCount = cache()->get($this->getCacheKey('updated'), 0);
+            $skippedCount = cache()->get($this->getCacheKey('skipped'), 0);
             $allJotformIds = cache()->get($this->getCacheKey('jotform_ids'), []);
 
             Log::info('Resuming JotForm sync', [
@@ -89,6 +91,7 @@ class JotformSyncJob implements ShouldQueue
                 'offset' => $offset,
                 'previous_synced' => $syncedCount,
                 'previous_updated' => $updatedCount,
+                'previous_skipped' => $skippedCount,
             ]);
 
             while ($hasMore) {
@@ -104,6 +107,7 @@ class JotformSyncJob implements ShouldQueue
                     cache()->put($this->getCacheKey('offset'), $offset, now()->addHours(2));
                     cache()->put($this->getCacheKey('synced'), $syncedCount, now()->addHours(2));
                     cache()->put($this->getCacheKey('updated'), $updatedCount, now()->addHours(2));
+                    cache()->put($this->getCacheKey('skipped'), $skippedCount, now()->addHours(2));
                     cache()->put($this->getCacheKey('jotform_ids'), $allJotformIds, now()->addHours(2));
 
                     // Dispatch next job to continue
@@ -158,6 +162,7 @@ class JotformSyncJob implements ShouldQueue
 
                         if ($existing) {
                             if ($existing->status_submit == 'SENT') {
+                                $skippedCount++;
                                 Log::debug('Skipping submission with SENT status', [
                                     'submission_id' => $submissionId,
                                 ]);
@@ -194,6 +199,16 @@ class JotformSyncJob implements ShouldQueue
                 // Free memory after processing batch
                 unset($submissions);
 
+                // Log batch summary
+                Log::info('Batch completed', [
+                    'sync_id' => $this->syncId,
+                    'offset' => $offset,
+                    'batch_synced' => $syncedCount,
+                    'batch_updated' => $updatedCount,
+                    'batch_skipped' => $skippedCount,
+                    'total_jotform_ids' => count($allJotformIds),
+                ]);
+
                 // Move to next batch
                 $offset += $limit;
 
@@ -201,6 +216,7 @@ class JotformSyncJob implements ShouldQueue
                 cache()->put($this->getCacheKey('offset'), $offset, now()->addHours(2));
                 cache()->put($this->getCacheKey('synced'), $syncedCount, now()->addHours(2));
                 cache()->put($this->getCacheKey('updated'), $updatedCount, now()->addHours(2));
+                cache()->put($this->getCacheKey('skipped'), $skippedCount, now()->addHours(2));
                 cache()->put($this->getCacheKey('jotform_ids'), $allJotformIds, now()->addHours(2));
 
                 // If we got less than limit, we're done
@@ -240,8 +256,10 @@ class JotformSyncJob implements ShouldQueue
                 'sync_id' => $this->syncId,
                 'synced' => $syncedCount,
                 'updated' => $updatedCount,
+                'skipped' => $skippedCount,
                 'deleted' => $deletedCount,
                 'errors' => count($errors),
+                'total_jotform_ids' => count($allJotformIds),
                 'total_time' => time() - $startTime,
             ]);
 
@@ -259,6 +277,7 @@ class JotformSyncJob implements ShouldQueue
             cache()->put($this->getCacheKey('offset'), $offset ?? 0, now()->addHours(2));
             cache()->put($this->getCacheKey('synced'), $syncedCount, now()->addHours(2));
             cache()->put($this->getCacheKey('updated'), $updatedCount, now()->addHours(2));
+            cache()->put($this->getCacheKey('skipped'), $skippedCount, now()->addHours(2));
             cache()->put($this->getCacheKey('jotform_ids'), $allJotformIds ?? [], now()->addHours(2));
 
             throw $e;
@@ -273,6 +292,7 @@ class JotformSyncJob implements ShouldQueue
         cache()->forget($this->getCacheKey('offset'));
         cache()->forget($this->getCacheKey('synced'));
         cache()->forget($this->getCacheKey('updated'));
+        cache()->forget($this->getCacheKey('skipped'));
         cache()->forget($this->getCacheKey('jotform_ids'));
     }
 

@@ -39,6 +39,11 @@ class JotformService
             // Add apiKey to query parameters
             $filters['apiKey'] = $this->apiKey;
 
+            // Set default limit to get all submissions (max 1000 per request)
+            if (!isset($filters['limit'])) {
+                $filters['limit'] = 1000;
+            }
+
             // Build filter to exclude deleted submissions
             $statusFilter = ['status:neq' => 'DELETED'];
 
@@ -57,6 +62,14 @@ class JotformService
             if ($response->successful()) {
                 $data = $response->json();
                 $submissions = $data['content'] ?? [];
+
+                Log::info('JotForm API Response', [
+                    'limit' => $filters['limit'],
+                    'offset' => $filters['offset'] ?? 0,
+                    'received_count' => count($submissions),
+                    'total_count' => $data['totalCount'] ?? 'N/A',
+                    'response_keys' => array_keys($data),
+                ]);
 
                 // Count submissions with DELETED status
                 $deletedCount = count(array_filter($submissions, function($submission) {
